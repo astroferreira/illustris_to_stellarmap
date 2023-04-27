@@ -108,8 +108,13 @@ def io(name, simulation='TNG50-1', halomode=True):
         print('Working on subhalo mode, only subhalo particles are going to be used.')
         halo_url = json['cutouts']['subhalo']
         halo_id = halo_url.split('/')[-2]
-        filename = f'subhalo_{simulation}_{snap}_{halo_id}'
+        filename = f'cutout_{simulation}_{snap}_{subfind}_{halo_id}'
         halo_url = halo_url.replace('http:', 'https:')
+        if not os.path.exists(f'particledata/{filename}.hdf5'):
+            print(f'Particle data not found. Downloading...')
+            filename = get(halo_url, filename=f'{filename}')
+        else:
+            print(f'Particle data found. Using {filename}.hdf5')
 
     
     

@@ -21,7 +21,7 @@ cosmo = LambdaCDM(H0=100*h, Om0=0.3089, Ob0=0.0486, Ode0=0.6911, Tcmb0=2.73)
 snapZ = np.load('snapTNG.npy')
 headers = {"api-key":"ff352a2affacf64753689dd603b5b44e"} #replace with your API-KEY
 
-def solve_coordinates(X, cm, rotation, simulation='TNG50-1'):
+def solve_coordinates(X, cm, rotation=np.identity(3), simulation='TNG50-1'):
     rotated = rotation.dot((correct_periodic_distances(X, simulation) - correct_periodic_distances(cm, simulation)).T).T * u.kpc
     coords = rotated.to(u.pc) * a / cosmo.h
     x = np.squeeze(np.array(coords.T[0], float))
@@ -45,7 +45,7 @@ def load_stellar(stellar, shPos, snap):
     ages = cosmo.lookback_time(1/stellar['GFM_StellarFormationTime'][:][stars] - 1) - cosmo.lookback_time(snapZ.T[snap][1])
     print('Loading stellar particles')
     
-    x, y, z = solve_coordinates(stellar['Coordinates'][:][stars], shPos, rotation, simulation=simulation)
+    x, y, z = solve_coordinates(stellar['Coordinates'][:][stars], shPos, simulation=simulation)
 
 
     within_fov = np.where((abs(x) < FOV*1000/2) & (abs(y) <  FOV*1000/2) & (abs(z) <  FOV*1000/2))
@@ -367,28 +367,20 @@ if __name__ == '__main__':
     redshift_snap = snapZ[1][snap]
     a = cosmo.scale_factor(redshift_snap)
 
+    
+    url = f'https://www.tng-project.org/api/{simulation}/snapshots/{snap}/subhalos/{subfind}/'
+    json = get(url)
+
+    halomode = 'halomode' in sys.argv
     if not os.path.exists(f'data/{simulation}_{name}_stars_.dat'):
         print('catalogs not found, loading particle data and extracting info...')
-    
-        halo, json, rHalf, shPos = io(name, simulation)    
+        halo, json, rHalf, shPos = io(name, simulation, halomode=halomode)    
         try:
             gas = halo['PartType0']
         except:
             gas = None
         
         stellar = halo['PartType4']
-
-
-        """
-        Find the rotation matrix that translated the x, y plane to faceon view.
-        If it is not possible to estimate it, return the identity matrix.
-        """
-        try:
-            rotation = find_faceon_rotation(gas, stellar, shPos, rHalf, a)
-            print(f'Finding face-on rotation matrix...')
-            print(f'R(x, y, z) = {rotation}')
-        except:
-            rotation = np.identity(3)
 
         galaxev_df = load_particles(stellar, gas, shPos, snap, simulation)
         galaxev_df[['x', 'y', 'z', 'h', 'mass', 'Z', 'age']].to_csv(f'data/{simulation}_{name}_stars_.dat', sep=' ', float_format='%g', header=False, index=False)
@@ -398,7 +390,9 @@ if __name__ == '__main__':
         
     
     ### Plot mass map
-    grid_resolution = 100 # 100 pc / pix
+    grid_resolution = 500 # 500 pc / pix
+    
+    
     galaxev_df["x_grid"] = np.floor(galaxev_df["x"] / grid_resolution).astype(int)
     galaxev_df["y_grid"] = np.floor(galaxev_df["y"] / grid_resolution).astype(int)
     galaxev_df["z_grid"] = np.floor(galaxev_df["z"] / grid_resolution).astype(int)
@@ -407,29 +401,30 @@ if __name__ == '__main__':
     'xy' : galaxev_df.groupby(["x_grid", "y_grid"])["mass"]
                 .sum()
                 .unstack(fill_value=0)
-                .values,
+                .values.astype(float),
     'xz' : galaxev_df.groupby(["x_grid", "z_grid"])["mass"]
                 .sum()
                 .unstack(fill_value=0)
-                .values,
+                .values.astype(float),
     'yz' : galaxev_df.groupby(["y_grid", "z_grid"])["mass"]
                 .sum()
                 .unstack(fill_value=0)
-                .values
+                .values.astype(float)
     }
 
     from astropy.convolution import Gaussian2DKernel, interpolate_replace_nans,convolve
-    kernel = Gaussian2DKernel(x_stddev=0.01)
+    #kernel = Gaussian2DKernel(x_stddev=0.01)
 
 
     f, axs = plt.subplots(1, 3, figsize=(10, 3))
 
-
-    a = axs[0].imshow(np.log10(convolve(mass_grid['xy'], kernel)), origin='lower', cmap='gist_gray')
+    import numpy as np
+    print(np)
+    a = axs[0].imshow(np.log10(mass_grid['xy']), origin='lower', cmap='gist_gray')
     plt.colorbar(a, fraction=0.046, pad=0.04)
-    a = axs[1].imshow(np.log10(convolve(mass_grid['xz'], kernel)), origin='lower', cmap='gist_gray')
+    a = axs[1].imshow(np.log10(mass_grid['xz']), origin='lower', cmap='gist_gray')
     plt.colorbar(a, fraction=0.046, pad=0.04)
-    a = axs[2].imshow(np.log10(convolve(mass_grid['yz'], kernel)), origin='lower', cmap='gist_gray')
+    a = axs[2].imshow(np.log10(mass_grid['yz']), origin='lower', cmap='gist_gray')
     plt.colorbar(a, fraction=0.046, pad=0.04)
     axs[1].set_title(f'{name} ' + r'$\log \rm \Sigma_{M_\odot}$')
     plt.subplots_adjust(wspace=0.4)
